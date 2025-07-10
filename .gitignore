@@ -1,0 +1,7 @@
+build
+*.zip
+.vscode
+.idea
+*.iml
+*.log
+textures/*
