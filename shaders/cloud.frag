@@ -1,137 +1,95 @@
-#version 460 core
+#version 330 core
 out vec4 FragColor;
+in vec2 TexCoord;
+uniform float uTime;
 
-in vec2 TexCoords;
-in vec3 WorldPos;
-in vec3 ViewDir;
+float hash(vec3 p) {
+    return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453123);
+}
 
-uniform sampler3D noiseTex1;
-uniform sampler3D noiseTex2;
+float valueNoise(vec3 p) {
+    vec3 i = floor(p);
+    vec3 f = fract(p);
 
-struct CloudParams {
-    vec4 shapeParams;    // coverage, density, softness, altitude
-    vec4 lightParams;    // absorption, scattering, powder, phase
-    vec3 sunColor;
-    vec3 windDirection;
-    float timeScale;
-    float minHeight;
-    float maxHeight;
-    float sphereRadius;
-    vec3 sphereCenter;
-};
-uniform CloudParams cloudParams;
+    float v000 = hash(i + vec3(0, 0, 0));
+    float v100 = hash(i + vec3(1, 0, 0));
+    float v010 = hash(i + vec3(0, 1, 0));
+    float v110 = hash(i + vec3(1, 1, 0));
+    float v001 = hash(i + vec3(0, 0, 1));
+    float v101 = hash(i + vec3(1, 0, 1));
+    float v011 = hash(i + vec3(0, 1, 1));
+    float v111 = hash(i + vec3(1, 1, 1));
 
-uniform vec3 cameraPos;
-uniform mat4 invProjection;
-uniform mat4 invView;
+    vec3 u = f * f * (3.0 - 2.0 * f);
 
-// 光线与球体相交
-vec2 raySphereIntersection(vec3 origin, vec3 dir, vec3 center, float radius) {
-    vec3 oc = origin - center;
-    float a = dot(dir, dir);
-    float b = 2.0 * dot(oc, dir);
-    float c = dot(oc, oc) - radius * radius;
-    float discriminant = b * b - 4.0 * a * c;
-    
-    if (discriminant < 0.0) {
-        return vec2(-1.0);
+    return mix(mix(mix(v000, v100, u.x), mix(v010, v110, u.x), u.y),
+               mix(mix(v001, v101, u.x), mix(v011, v111, u.x), u.y), u.z);
+}
+
+// FBM with higher frequency and finer details
+float fbm(vec3 p) {
+    float value = 0.0;
+    float amplitude = 0.6;
+    float frequency = 1.5;
+    for (int i = 0; i < 6; ++i) {
+        value += amplitude * valueNoise(p * frequency);
+        frequency *= 2.1;
+        amplitude *= 0.45;
     }
-    
-    float sqrtDisc = sqrt(discriminant);
-    float t1 = (-b - sqrtDisc) / (2.0 * a);
-    float t2 = (-b + sqrtDisc) / (2.0 * a);
-    
-    return vec2(t1, t2);
-}
-
-// 云密度采样
-float sampleCloudDensity(vec3 position) {
-    // 应用风动画
-    vec3 animatedPos = position + cloudParams.windDirection * cloudParams.timeScale * float(gl_FragCoord.x);
-    
-    // 采样噪声纹理
-    float noise1 = texture(noiseTex1, animatedPos * 0.01).r;
-    float noise2 = texture(noiseTex2, animatedPos * 0.05).r;
-    
-    // 组合噪声
-    float baseShape = clamp(noise1 - cloudParams.shapeParams.x, 0.0, 1.0) * cloudParams.shapeParams.y;
-    float detail = noise2 * cloudParams.shapeParams.z;
-    float finalDensity = baseShape * detail;
-    
-    // 高度衰减
-    float height = position.y - cloudParams.minHeight;
-    float heightFactor = clamp(height / (cloudParams.maxHeight - cloudParams.minHeight), 0.0, 1.0);
-    heightFactor *= 1.0 - clamp((height - cloudParams.maxHeight * 0.8) / (cloudParams.maxHeight * 0.2), 0.0, 1.0);
-    
-    return finalDensity * heightFactor;
-}
-
-// 光照计算
-vec3 calculateLighting(vec3 position, float density, vec3 sunDir) {
-    // Henyey-Greenstein相位函数
-    float g = cloudParams.lightParams.w;
-    float cosTheta = dot(normalize(position - cameraPos), sunDir);
-    float phase = (1.0 - g * g) / (4.0 * 3.1415 * pow(1.0 + g * g - 2.0 * g * cosTheta, 1.5));
-    
-    // 光线吸收
-    float beer = exp(-density * cloudParams.lightParams.x);
-    
-    // 粉末效果
-    float powder = 1.0 - exp(-density * 2.0 * cloudParams.lightParams.z);
-    
-    return cloudParams.sunColor * phase * beer * powder * cloudParams.lightParams.y;
+    return value;
 }
 
 void main() {
-    vec3 rayOrigin = cameraPos;
-    vec3 rayDir = normalize(ViewDir);
-    
-    // 最大渲染距离
-    float maxDistance = 10000.0;
-    
-    // 初始化结果
-    vec4 result = vec4(0.0);
-    
-    // 计算与云层的交点
-    vec2 cloudHit = raySphereIntersection(rayOrigin, rayDir, cloudParams.sphereCenter, cloudParams.sphereRadius);
-    if (cloudHit.x > cloudHit.y) {
-        FragColor = result;
-        return;
-    }
-    
-    float startDistance = max(cloudHit.x, 0.0);
-    float endDistance = min(cloudHit.y, maxDistance);
-    
-    // Ray Marching参数
-    int stepCount = 64;
-    float stepSize = (endDistance - startDistance) / float(stepCount);
-    
-    // 太阳方向 (简单起见，假设在xz平面)
-    vec3 sunDir = normalize(vec3(1.0, 0.5, 1.0));
-    
+    vec3 rayOrigin = vec3(0.0, 0.0, 0.0);
+    vec3 rayDir = normalize(vec3(TexCoord - 0.5, 1.0));
+
+    // Sky background gradient
+    vec3 skyTop = vec3(0.52, 0.75, 0.95);
+    vec3 skyBottom = vec3(0.90, 0.95, 1.00);
+    float skyT = clamp(rayDir.y * 0.5 + 0.5, 0.0, 1.0);
+    vec3 background = mix(skyBottom, skyTop, pow(skyT, 1.5));
+
+    vec3 color = background;
     float transmittance = 1.0;
-    
-    for (int i = 0; i < stepCount; ++i) {
-        float t = startDistance + (float(i) + 0.5) * stepSize;
-        vec3 samplePos = rayOrigin + rayDir * t;
-        
-        float density = sampleCloudDensity(samplePos);
-        if (density <= 0.0) continue;
-        
-        // 光照计算
-        vec3 lighting = calculateLighting(samplePos, density, sunDir);
-        
-        // 累积颜色和透明度
-        float alpha = density * stepSize;
-        vec3 color = lighting * transmittance;
-        
-        result.rgb += color * alpha;
-        transmittance *= exp(-alpha);
-        
-        // 提前退出
+    float t = 0.0;
+
+    const int MAX_STEPS = 128;
+    const float STEP_SIZE = 0.08;
+
+    for (int i = 0; i < MAX_STEPS; ++i) {
+        vec3 pos = rayOrigin + t * rayDir;
+
+        // Animate both X and Z to simulate movement
+        vec3 animatedPos = pos * 1.0 + vec3(uTime * 0.05, 0.0, uTime * 0.02);
+
+        // Optional: constrain cloud to a "height layer"
+        float heightFactor = smoothstep(-1.0, 2.0, pos.y) * smoothstep(6.0, 4.0, pos.y);
+
+        float base = fbm(animatedPos * 0.5);
+        float detail = fbm(animatedPos * 2.0);
+        float d = base * detail;
+
+        // Sharper density mapping, more broken-up clouds
+        float density = smoothstep(0.3, 0.7, d);
+        density = pow(density, 1.5);
+        density *= heightFactor;
+
+        // Filter out very low density
+        if (density < 0.05) {
+            t += STEP_SIZE;
+            continue;
+        }
+
+        // Simple lighting
+        vec3 light = vec3(1.0);
+        vec3 cloudColor = vec3(1.0);
+
+        color = mix(color, cloudColor * light, density * transmittance * 0.2);
+        transmittance *= exp(-density * 0.15);
         if (transmittance < 0.01) break;
+
+        t += STEP_SIZE;
     }
-    
-    result.a = 1.0 - transmittance;
-    FragColor = result;
+
+    FragColor = vec4(color, 1.0);
 }
