@@ -34,12 +34,31 @@ int main() {
 
     Shader shader("shaders/cloud.vert", "shaders/cloud.frag");
 
+    GLuint timeQuery;
+    glGenQueries(1, &timeQuery);
+
     while (!glfwWindowShouldClose(window)) {
         float time = glfwGetTime();
         glClear(GL_COLOR_BUFFER_BIT);
 
+        glBeginQuery(GL_TIME_ELAPSED, timeQuery);
+
         shader.use();
         shader.setFloat("uTime", time);
+
+        glEndQuery(GL_TIME_ELAPSED);
+
+        GLint available = 0;
+        while (!available) {
+            glGetQueryObjectiv(timeQuery, GL_QUERY_RESULT_AVAILABLE, &available);
+        }
+
+        GLuint64 timeElapsed;
+        glGetQueryObjectui64v(timeQuery, GL_QUERY_RESULT, &timeElapsed);
+
+        std::cout << "Frame GPU time: " << (timeElapsed / 1000000.0) << " ms" << std::endl;
+
+
         glBindVertexArray(VAO);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 

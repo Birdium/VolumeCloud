@@ -63,7 +63,7 @@ void main() {
         vec3 animatedPos = pos * 1.0 + vec3(uTime * 0.05, 0.0, uTime * 0.02);
 
         // Optional: constrain cloud to a "height layer"
-        float heightFactor = smoothstep(-1.0, 2.0, pos.y) * smoothstep(6.0, 4.0, pos.y);
+        float heightFactor = smoothstep(-1.0, 2.0, pos.y) * smoothstep(5.0, 3.0, pos.y);
 
         float base = fbm(animatedPos * 0.5);
         float detail = fbm(animatedPos * 2.0);
@@ -85,7 +85,7 @@ void main() {
         vec3 cloudColor = vec3(1.0);
 
         color = mix(color, cloudColor * light, density * transmittance * 0.2);
-        transmittance *= exp(-density * 0.15);
+        transmittance *= exp(-density * 0.01);
         if (transmittance < 0.01) break;
 
         t += STEP_SIZE;
